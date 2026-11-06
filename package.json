@@ -1,6 +1,6 @@
 {
   "name": "dsh-tube-insight",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "By Ruby · DSH plugin: Fetch YouTube transcripts, segment them into readable timestamped paragraphs, and export them as cited Markdown notes with DeepSeek Harness.",
   "type": "module",
   "main": "lib/index.js",
