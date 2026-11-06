@@ -13,7 +13,7 @@ Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insig
 - **Cross-video search** (0.2.0): `tube_search` searches the transcripts of **all videos you have previously fetched** (BM25 + contiguous-phrase boost, English/CJK tokenization) and returns the video, `[MM:SS]` timestamp, original snippet and a jump link — for "what did the videos I watched say about X?" and topic reviews. It searches the local cache only, never the whole web.
 - **Topic brief** (0.3.0): `tube_synthesis` runs 1–7 search terms (`query` + `queries`) over your cached videos, merges/dedupes by (video, timestamp), groups by video and trims the result — returning a fixed-structure **evidence brief** (every item with `[MM:SS]` and a jump link, plus zero-hit videos and coverage stats). Pass `dir` to save it as Markdown with frontmatter (module=knowledge), a sources block and an updated `index.md`; the model writes the review from the brief without copying citations by hand.
 - **Bundled skill**: the `tube-insight` skill ships overview / intel / insights / prd / compare / knowledge / translation workflows plus citation rules.
-- **Sidebar "Video Library"** (0.4.0): the DSH Web sidebar gets a "视频库" entry whose main area is the read-only page `/tube-insight/` — cached video list (title/channel/duration/segments/fetched time), server-side subtitle search via `?q=` (with `[MM:SS]`, snippets and jump links), and a per-video transcript page `/tube-insight/v/<videoId>` (metadata, chapters, full `[MM:SS]` transcript). Rendered by the host with no frontend build, no external resources and no writes; restart the DSH App for the entry to appear.
+- **Sidebar "TubeInsight / Video Workspace"** (0.5.0): the DSH Web sidebar gets a "视频库" entry whose main area is a **video workspace** (single-page app, light by default, follows the DSH dark theme): left column with search + video list + multi-select compare; right column with four tabs — transcript / chapters / actions / notes. Transcript search with highlighting and prev/next jumps, copy citation/original/full text, export Markdown, chapter navigation, six AI action cards (overview / product intel / insights / PRD / Chinese notes / export), and local notes (add/delete/copy/let AI organize). Every action posts a message so DSH opens a **new session with the prompt filled in** (it is never sent automatically). No frontend build, no external resources, no writes; restart the DSH App for the entry to appear.
 
 Limits: caption-only (native or auto-generated) — no ASR transcription; private/restricted videos are rejected with an actionable error.
 
@@ -46,15 +46,20 @@ Just talk to the agent:
 
 The model calls the tools first, then follows the bundled skill workflow. `tube_search` **only searches videos you have already fetched with `tube_transcript`**: an empty cache produces an actionable error telling you to fetch a video first; it never searches the whole web.
 
-### Video Library page (0.4.0)
+### Video Workspace (0.5.0)
 
-After installing and **restarting the DSH App**, the sidebar shows a "视频库" entry that opens `/tube-insight/` in the main area:
+After installing and **restarting the DSH App**, the sidebar shows a "视频库" entry that opens the video workspace at `/tube-insight/`:
 
-- Home: cache stats + cached video list (newest first) + search box; search uses `GET /tube-insight/?q=<terms>` (server-side lexical search, at most 20 results).
-- Transcript page: `GET /tube-insight/v/<11-char videoId>` with title/channel/duration/caption language/chapters/full transcript; every segment has a `[MM:SS]` link that jumps to that moment on YouTube.
-- Read-only: only `GET/HEAD` (other methods → 405); unknown paths, invalid videoIds and uncached videos → 404; corrupt cache files are skipped; every cached string and the query are HTML-escaped; the page loads no external resources (YouTube appears only as outbound links).
+- **Left column**: search by title/channel (`/` shortcut to focus), a video list sorted by fetch time (title/channel/duration/segments/fetched time), a per-row checkbox for compare selection (≤10; a bottom bar shows "已选 N/10 · 生成多视频对比"), and an open-on-YouTube icon on hover. The column is collapsible (topbar "列表" button; preference kept in localStorage).
+- **Right column, four tabs**:
+  - Transcript: full-text search with highlight, match count and prev/next jumps; each `[MM:SS]` opens YouTube, copy citation (`[MM:SS](youtu.be link)`), copy original text, save as note; toolbar to copy the full transcript, export Markdown, or save the transcript as a note.
+  - Chapters: chapter list parsed from the description; clicking jumps back to the transcript and highlights the segment.
+  - Actions: six cards (overview / product intel / insights / PRD draft / Chinese notes·bilingual / export Markdown). Clicking opens a new DSH session with a prompt containing the video title and link; you send it once ready.
+  - Notes: localStorage (`tube-insight:notes:<videoId>`) add/delete, copy all as Markdown, and "let AI organize" (also via a new session).
+- **Routes / API** (read-only): page `GET /tube-insight/` (hash route `#/v/<videoId>`); `GET /tube-insight/api/videos` (list + stats); `GET /tube-insight/api/videos/<videoId>` (chapters + full segments + youtubeUrl); legacy `/tube-insight/v/<id>` redirects 302 to `/#/v/<id>`. Only GET/HEAD (others → 405); unknown/invalid/uncached → 404; corrupt cache files are skipped.
+- No external resources (YouTube is only an outbound link), all dynamic text rendered with `textContent` (no innerHTML), and a single-column 375px mobile layout.
 
-> The page is for browsing; fetching/searching/analysis still happen in the conversation through the tools and the skill.
+> Action buttons never run tools directly: they hand a context-rich prompt to a new DSH session, which then follows the `tube-insight` skill.
 
 ### Tool signatures
 
@@ -152,7 +157,7 @@ Export directories are chosen with the `dir` parameter (default `~/TubeInsight`)
 
 `tube_search` is **read-only** over `cache/`: it writes no files, makes no network requests and creates no new data directories. When the cache holds more than 500 videos it scans only the 500 most recent (by `fetchedAt`) and reports `truncated: true`; fetch/refresh a video with `tube_transcript` before searching for the latest content.
 
-The Video Library page (`/tube-insight/`) is read-only over `cache/` too and adds no data directories; its HTML is rendered on demand by the host and never written to disk.
+The Video Workspace (`/tube-insight/`) is read-only over `cache/` too and adds no data directories; the host inlines its HTML/CSS/JS and never writes it to disk. The only writes are notes and the sidebar-collapse preference in the local browser's localStorage.
 
 `tube_synthesis` is read-only by default too; it only writes to the export directory when `dir` is given (reusing the `tube_export` pipeline: frontmatter module=knowledge, sources block, `index.md`, duplicate names numbered).
 
@@ -194,7 +199,7 @@ npm pack --dry-run               # check the files list
 node scripts/smoke.mjs           # real fetch of one video (network), writes under $DSH_HOME/tube-insight/
 ```
 
-Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), topic briefs (multi-term merge & dedupe / grouping & truncation / fixed structure / frontmatter + index on disk / determinism / error paths), Video Library pages (HTML contract / XSS escaping / 404·405·HEAD / corrupt cache / empty-cache guidance / search limit 20 / ≤2MB page truncation), the sidebar client half (package.json declaration / `node --check` / simulated `__ModuleLoader__` mount / iframe & icon), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
+Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), topic briefs (multi-term merge & dedupe / grouping & truncation / fixed structure / frontmatter + index on disk / determinism / error paths), Video Workspace (SPA shell / API shapes / legacy-route 302 / 404·405·HEAD / corrupt cache / empty cache / no external resources and no innerHTML / app.css design tokens and component classes), the sidebar client half (package.json declaration / `node --check` / simulated `__ModuleLoader__` mount / theme push / start-session action bridge and receipts / invalid-message ignoring), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
 
 ## Privacy & license
 

@@ -1,18 +1,20 @@
-// /tube-insight/ 只读页面测试（H1）：真实本地 http server + 临时 DSH_HOME fixture。
-// 覆盖：首页/搜索结果/转录页 HTML 契约、XSS 转义、404/405/HEAD、损坏缓存跳过、空缓存引导、
-// 检索 limit 20、单页 ≤2MB 截断。
+// /tube-insight/ 视频工作台测试（0.5.0）：SPA 壳 + JSON API + 旧路由兼容 + 安全边界。
+// 用临时 DSH_HOME fixture（2 个正常视频 + 1 个损坏缓存）与真实本地 http server。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { clearSearchCache } from '../lib/search.js'
-import { createHandler } from '../lib/web.js'
+import { BASE, buildVideoPayload, buildVideosPayload, createHandler } from '../lib/web.js'
 import { makeTempDshHome, writeCacheFixture, writeRawCacheFile } from './_helpers.mjs'
 
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const ID_A = 'webtest0001'
 const ID_B = 'webtest0002'
 const ID_CORRUPT = 'webtest0003'
-const MAX_PAGE_BYTES = 2 * 1024 * 1024
 
 function setup(t) {
   const home = makeTempDshHome()
@@ -39,6 +41,17 @@ async function request(base, path, options) {
   return { response, text }
 }
 
+async function requestJson(base, path, options) {
+  const { response, text } = await request(base, path, options)
+  let json = null
+  try {
+    json = JSON.parse(text)
+  } catch {
+    json = null
+  }
+  return { response, text, json }
+}
+
 function writeFixtures() {
   writeCacheFixture({
     videoId: ID_A,
@@ -48,7 +61,6 @@ function writeFixtures() {
     fetchedAt: '2026-06-01T00:00:00.000Z',
     language: 'zh-Hans',
     captionKind: 'native',
-    source: 'innertube-ios',
     chapters: [
       { title: 'Intro <b>bold</b>', startSeconds: 0 },
       { title: 'Training', startSeconds: 30 },
@@ -70,7 +82,7 @@ function writeFixtures() {
   writeRawCacheFile(`${ID_CORRUPT}.json`, '{not valid json')
 }
 
-test('首页：HTML 契约、统计、按抓取时间排序、XSS 转义、无外部资源', async (t) => {
+test('SPA 壳：内联 CSS/JS、DOM 骨架、主题与动作桥契约、无外部资源', async (t) => {
   setup(t)
   writeFixtures()
   const base = await startServer(t)
@@ -78,192 +90,217 @@ test('首页：HTML 契约、统计、按抓取时间排序、XSS 转义、无�
   const { response, text } = await request(base, '/tube-insight/')
   assert.equal(response.status, 200)
   assert.match(response.headers.get('content-type') || '', /text\/html/)
-  assert.match(text, /<title>TubeInsight 视频库<\/title>/)
-  assert.match(text, /id="ti-search"/)
-  assert.match(text, /method="get"/)
-  assert.match(text, /class="ti-stat"/)
-  assert.match(text, /缓存 <strong>2<\/strong> 个视频/)
-  assert.match(text, /共 <strong>4<\/strong> 个段落/)
-  assert.match(text, /损坏缓存/)
+  assert.match(text, /<html lang="zh-CN" data-theme="light">/)
+  assert.match(text, /<title>TubeInsight 视频工作台<\/title>/)
+  assert.ok(text.includes('<style>') && text.includes('</style>'), '样式应内联')
+  assert.ok(text.includes('<script>') && text.includes('</script>'), '脚本应内联')
+  for (const id of ['video-list', 'detail', 'video-search', 'compare-bar', 'compare-count', 'compare-btn', 'refresh-btn', 'stats', 'toast-container']) {
+    assert.ok(text.includes(`id="${id}"`), `缺少 DOM 骨架 #${id}`)
+  }
+  // 页面不再服务端渲染列表：数据走 API + 前端渲染
+  assert.ok(!text.includes('LLM 基础'), 'SPA 壳不应内联视频数据')
 
-  // 视频行：2 条正常视频（损坏缓存跳过），按 fetchedAt 降序（B 比 A 新）
-  const rows = text.match(/class="ti-video-row"/g) || []
-  assert.equal(rows.length, 2)
-  assert.match(text, new RegExp(`data-video-id="${ID_A}"`))
-  assert.match(text, new RegExp(`data-video-id="${ID_B}"`))
-  assert.ok(text.indexOf(ID_B) < text.indexOf(ID_A), '视频列表应按 fetchedAt 降序')
-  assert.match(text, new RegExp(`href="/tube-insight/v/${ID_A}"`))
+  // 前端契约（主题 + 动作桥 + hash 路由 + 笔记）
+  for (const needle of [
+    'tube-insight:ready',
+    'tube-insight:theme',
+    'tube-insight:start-session',
+    'data-theme',
+    '#/v/',
+    'localStorage',
+    'transcript-search',
+    'data-tab',
+    'compare-bar',
+  ]) {
+    assert.ok(text.includes(needle), `前端脚本缺少契约：${needle}`)
+  }
 
-  // XSS：缓存的标题/频道/段落里的标签必须被转义
-  assert.ok(!/<script[\s>]/i.test(text), '页面不应出现未转义的 <script>')
-  assert.ok(!/<img[\s>]/i.test(text), '页面不应出现未转义的 <img>')
-  assert.ok(!text.includes('<script>alert'), '缓存的 <script> 必须被转义')
-  assert.ok(text.includes('&lt;script&gt;alert'), '标题/段落里的 <script> 应显示为 &lt;script&gt;')
-  assert.ok(text.includes('&lt;img src=x'), '频道里的 <img> 应显示为 &lt;img')
+  // 无外部资源（YouTube 只是跳转链接，不是加载资源）
+  assert.ok(!/<link[\s>]/i.test(text), '不应有 <link> 外部资源')
+  assert.ok(!/src="https?:/i.test(text), '不应有外部 src')
+  assert.ok(!/@import/i.test(text), '不应 @import 外部样式')
+  assert.ok(!/url\(\s*['"]?https?:/i.test(text), '不应在 CSS 里引用外部 URL')
 
-  // 无外部资源（YouTube 只是跳转链接，不加载资源）
-  assert.ok(!/<link[\s>]/i.test(text), '不应有外部 <link> 资源')
-  assert.ok(!/<iframe[\s>]/i.test(text), '页面不应内嵌 iframe')
-  assert.ok(!/src="https?:\/\//i.test(text), '页面不应加载外部资源')
+  // 无 innerHTML（动态文本一律 textContent/createTextNode）
+  assert.ok(!text.includes('innerHTML'), '前端脚本不应使用 innerHTML')
 
-  // /tube-insight（无尾斜杠）同样可用
-  const bare = await request(base, '/tube-insight')
-  assert.equal(bare.response.status, 200)
-  assert.match(bare.text, /TubeInsight 视频库/)
-})
+  // 查询串多余参数忽略
+  const withQuery = await request(base, '/tube-insight/?foo=bar')
+  assert.equal(withQuery.response.status, 200)
+  assert.match(withQuery.text, /TubeInsight 视频工作台/)
 
-test('搜索：?q= 结果契约、[MM:SS]、#t= 与 youtu.be 链接、命中统计、多余参数忽略', async (t) => {
-  setup(t)
-  writeFixtures()
-  const base = await startServer(t)
-
-  const { response, text } = await request(base, '/tube-insight/?q=alpha&foo=bar')
-  assert.equal(response.status, 200)
-  const results = text.match(/class="ti-result"/g) || []
-  assert.equal(results.length, 3, 'alpha 应命中 3 条（视频 A 两条 + 视频 B 一条）')
-  assert.match(text, /data-video-id="webtest0001" data-start="0"/)
-  assert.match(text, /data-video-id="webtest0001" data-start="30"/)
-  assert.match(text, /data-video-id="webtest0002" data-start="10"/)
-  assert.match(text, /\[0:00\]/)
-  assert.match(text, /\[0:30\]/)
-  assert.match(text, new RegExp(`href="/tube-insight/v/${ID_A}#t=0"`))
-  assert.match(text, new RegExp(`href="https://youtu\\.be/${ID_A}\\?t=0"`))
-  assert.match(text, /命中 <strong>3<\/strong> 条/)
-  assert.match(text, /扫描 <strong>2<\/strong> 个视频/)
-
-  // 中文查询命中中文段落（bigram 搜索：「模型训练」也会命中「大语言模型」段落，共 2 条）
-  const chinese = await request(base, `/tube-insight/?q=${encodeURIComponent('模型训练')}`)
-  assert.equal(chinese.response.status, 200)
-  const chineseResults = (chinese.text.match(/class="ti-result"/g) || []).length
-  assert.ok(chineseResults >= 1, '中文查询应有命中')
-  assert.match(chinese.text, /data-start="60"/)
-  const chineseStarts = [...chinese.text.matchAll(/<article class="ti-result"[^>]*data-start="(\d+)"/g)].map((m) => m[1])
-  assert.equal(chineseStarts[0], '60', '包含完整「模型训练」的段落应排在最前面')
-
-  // 无命中：明确提示 + 清除检索入口
-  const none = await request(base, '/tube-insight/?q=zzzznohit')
-  assert.equal(none.response.status, 200)
-  assert.match(none.text, /没有命中/)
-  assert.match(none.text, /命中 <strong>0<\/strong> 条/)
-
-  // query 回显必须转义（不能原样输出 <script>）
-  const xss = await request(base, `/tube-insight/?q=${encodeURIComponent('<script>alert(9)</script>')}`)
-  assert.equal(xss.response.status, 200)
-  assert.ok(!xss.text.includes('<script>alert'), 'query 回显必须转义')
-  assert.ok(!/<script[\s>]/i.test(xss.text))
-})
-
-test('转录页：元数据、章节、完整转录、[MM:SS] 链接、锚点与转义', async (t) => {
-  setup(t)
-  writeFixtures()
-  const base = await startServer(t)
-
-  const { response, text } = await request(base, `/tube-insight/v/${ID_A}`)
-  assert.equal(response.status, 200)
-  assert.match(text, /class="ti-back"/)
-  assert.match(text, /class="ti-title"/)
-  assert.match(text, /class="ti-time"/)
-  assert.match(text, /章节（2）/)
-  assert.match(text, /#t=30/)
-  assert.match(text, /zh-Hans/)
-  assert.match(text, /原生/)
-  assert.ok(text.includes(`${ID_A}`) && /youtu\.be\/webtest0001\?t=0/.test(text), '应有 YouTube 打开按钮')
-
-  const segments = text.match(/class="ti-segment"/g) || []
-  assert.equal(segments.length, 3, '.ti-segment 数量应等于段落数')
-  assert.match(text, /class="ti-segment" id="t=0" data-start="0"/)
-  assert.match(text, /class="ti-segment" id="t=60" data-start="60"/)
-  assert.match(text, /\[0:00\]/)
-  assert.match(text, /\[1:00\]/)
-  assert.match(text, /https:\/\/youtu\.be\/webtest0001\?t=60/)
-
-  // 段落与标题里的标签必须转义
-  assert.ok(!text.includes('<script>alert'), '转录页不应出现未转义 <script>')
-  assert.ok(text.includes('&lt;script&gt;alert'))
-  assert.ok(text.includes('&lt;b&gt;bold&lt;/b&gt;'), '章节标题里的 <b> 应被转义')
-  assert.ok(!/<script[\s>]/i.test(text))
-})
-
-test('404 / 405 / HEAD / 损坏缓存', async (t) => {
-  setup(t)
-  writeFixtures()
-  const base = await startServer(t)
-
-  assert.equal((await request(base, `/tube-insight/v/aaaaaaaaaaa`)).response.status, 404, '未缓存的合法 id → 404')
-  assert.equal((await request(base, `/tube-insight/v/invalid-id`)).response.status, 404, '非法 id → 404')
-  assert.equal((await request(base, `/tube-insight/v/${ID_CORRUPT}`)).response.status, 404, '损坏缓存 → 404')
-  assert.equal((await request(base, '/tube-insight/unknown')).response.status, 404)
-  assert.equal((await request(base, '/tube-insight/v/webtest00001/extra')).response.status, 404)
-
-  const post = await request(base, '/tube-insight/', { method: 'POST' })
-  assert.equal(post.response.status, 405)
-  assert.match(post.response.headers.get('allow') || '', /GET/)
-  assert.match(post.text, /只读/)
-
-  const put = await request(base, `/tube-insight/v/${ID_A}`, { method: 'PUT' })
-  assert.equal(put.response.status, 405)
-  const del = await request(base, '/tube-insight/', { method: 'DELETE' })
-  assert.equal(del.response.status, 405)
-
+  // HEAD 不返回 body
   const head = await request(base, '/tube-insight/', { method: 'HEAD' })
   assert.equal(head.response.status, 200)
-  assert.equal(head.text, '', 'HEAD 不应返回 body')
-  assert.match(head.response.headers.get('content-type') || '', /text\/html/)
+  assert.equal(head.text, '')
 })
 
-test('空缓存：首页给出引导（抓取后刷新）', async (t) => {
+test('API：GET /api/videos 形状、倒序、统计、损坏缓存跳过', async (t) => {
+  setup(t)
+  writeFixtures()
+  const base = await startServer(t)
+
+  const { response, json } = await requestJson(base, '/tube-insight/api/videos')
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') || '', /application\/json/)
+  assert.ok(json)
+  assert.equal(Array.isArray(json.videos), true)
+  assert.equal(json.videos.length, 2, '损坏缓存应被跳过')
+  assert.deepEqual(json.stats, { videos: 2, segments: 4, skipped: 1 })
+  assert.deepEqual(json.videos.map((video) => video.videoId), [ID_B, ID_A], '按 fetchedAt 倒序')
+
+  const first = json.videos.find((video) => video.videoId === ID_A)
+  assert.equal(first.title, 'LLM 基础 <script>alert(1)</script>')
+  assert.equal(first.channel, '频道甲 <img src=x onerror=alert(2)>')
+  assert.equal(first.durationSeconds, 600)
+  assert.equal(first.segmentCount, 3)
+  assert.equal(first.language, 'zh-Hans')
+  assert.equal(first.captionKind, 'native')
+  assert.equal(first.fetchedAt, '2026-06-01T00:00:00.000Z')
+  assert.deepEqual(first.chapters, [
+    { start: 0, title: 'Intro <b>bold</b>' },
+    { start: 30, title: 'Training' },
+  ])
+
+  // 直接调用 payload 构建函数时结果一致
+  assert.equal(buildVideosPayload().stats.videos, 2)
+})
+
+test('API：GET /api/videos/<id> 详情形状（章节 start 字段、段落、youtubeUrl）', async (t) => {
+  setup(t)
+  writeFixtures()
+  const base = await startServer(t)
+
+  const { response, json } = await requestJson(base, `/tube-insight/api/videos/${ID_A}`)
+  assert.equal(response.status, 200)
+  assert.ok(json)
+  assert.equal(json.youtubeUrl, 'https://www.youtube.com/watch?v=webtest0001')
+  assert.ok(json.video)
+  assert.equal(json.video.videoId, ID_A)
+  assert.equal(json.video.segmentCount, 3)
+  assert.deepEqual(json.video.chapters, [
+    { start: 0, title: 'Intro <b>bold</b>' },
+    { start: 30, title: 'Training' },
+  ])
+  assert.deepEqual(json.video.segments, [
+    { start: 0, text: 'alpha beta 介绍大语言模型 <script>alert(3)</script>' },
+    { start: 30, text: 'alpha appears again in the middle' },
+    { start: 60, text: '模型训练需要大量数据' },
+  ])
+  assert.equal(json.video.fetchedAt, '2026-06-01T00:00:00.000Z')
+
+  // API 是 JSON，不转义 HTML（前端用 textContent 渲染；页面侧无 innerHTML）
+  const raw = buildVideoPayload(ID_A)
+  assert.equal(raw.video.segments[0].text.includes('<script>'), true)
+
+  // 非法 / 不存在 / 损坏 → 404 JSON
+  for (const bad of ['invalid-id', 'aaaaaaaaaaa', ID_CORRUPT]) {
+    const missing = await requestJson(base, `/tube-insight/api/videos/${bad}`)
+    assert.equal(missing.response.status, 404, `${bad} 应为 404`)
+    assert.equal(missing.json?.error, 'not_found')
+  }
+  assert.equal(buildVideoPayload('nope'), null)
+})
+
+test('旧路由兼容：/v/<id> → 302 到单页 hash 路由；未知/非法 → 404', async (t) => {
+  setup(t)
+  writeFixtures()
+  const base = await startServer(t)
+
+  const legacy = await fetch(`${base}/tube-insight/v/${ID_A}`, { redirect: 'manual' })
+  assert.equal(legacy.status, 302)
+  assert.equal(legacy.headers.get('location'), `/tube-insight/#/v/${ID_A}`)
+
+  assert.equal((await request(base, '/tube-insight/v/aaaaaaaaaaa')).response.status, 404)
+  assert.equal((await request(base, '/tube-insight/v/invalid-id')).response.status, 404)
+})
+
+test('404 / 405 / HEAD（页面与 API 一致）', async (t) => {
+  setup(t)
+  writeFixtures()
+  const base = await startServer(t)
+
+  assert.equal((await request(base, '/tube-insight/unknown')).response.status, 404)
+  assert.equal((await request(base, '/tube-insight/api/nope')).response.status, 404)
+
+  for (const [path, method] of [
+    ['/tube-insight/', 'POST'],
+    ['/tube-insight/', 'PUT'],
+    [`/tube-insight/api/videos/${ID_A}`, 'DELETE'],
+  ]) {
+    const { response } = await request(base, path, { method })
+    assert.equal(response.status, 405, `${method} ${path} 应为 405`)
+    assert.match(response.headers.get('allow') || '', /GET/)
+  }
+
+  const headApi = await request(base, '/tube-insight/api/videos', { method: 'HEAD' })
+  assert.equal(headApi.response.status, 200)
+  assert.equal(headApi.text, '')
+  assert.match(headApi.response.headers.get('content-type') || '', /application\/json/)
+})
+
+test('空缓存：API 空列表、stats 归零、页面仍可加载', async (t) => {
   setup(t)
   const base = await startServer(t)
 
-  const { response, text } = await request(base, '/tube-insight/')
-  assert.equal(response.status, 200)
-  assert.match(text, /本地还没有缓存的视频转录/)
-  assert.match(text, /tube_transcript/)
-  assert.equal((text.match(/class="ti-video-row"/g) || []).length, 0)
-  assert.match(text, /id="ti-search"/)
+  const { json } = await requestJson(base, '/tube-insight/api/videos')
+  assert.deepEqual(json.videos, [])
+  assert.deepEqual(json.stats, { videos: 0, segments: 0, skipped: 0 })
 
-  const withQuery = await request(base, '/tube-insight/?q=alpha')
-  assert.equal(withQuery.response.status, 200)
-  assert.match(withQuery.text, /本地还没有缓存的视频转录/)
+  const shell = await request(base, '/tube-insight/')
+  assert.equal(shell.response.status, 200)
+  assert.match(shell.text, /TubeInsight 视频工作台/)
 })
 
-test('只有损坏缓存时：首页不崩、显示引导并提示跳过的损坏缓存', async (t) => {
+test('只有损坏缓存：不崩，报告 skipped', async (t) => {
   setup(t)
   writeRawCacheFile(`${ID_CORRUPT}.json`, '{"oops":')
   const base = await startServer(t)
-  const { response, text } = await request(base, '/tube-insight/')
-  assert.equal(response.status, 200)
-  assert.match(text, /本地还没有缓存的视频转录/)
-  assert.match(text, /跳过 1 个损坏缓存/)
+  const { json } = await requestJson(base, '/tube-insight/api/videos')
+  assert.deepEqual(json.videos, [])
+  assert.equal(json.stats.skipped, 1)
 })
 
-test('检索结果受 limit 20 限制', async (t) => {
-  setup(t)
-  writeCacheFixture({
-    videoId: 'webtest0010',
-    title: 'Many Hits',
-    segments: Array.from({ length: 30 }, (_unused, index) => ({ start: index * 5, text: `topic item ${index}` })),
-  })
-  const base = await startServer(t)
-  const { response, text } = await request(base, '/tube-insight/?q=topic')
-  assert.equal(response.status, 200)
-  assert.equal((text.match(/class="ti-result"/g) || []).length, 20, '检索结果最多 20 条')
-  assert.match(text, /命中 <strong>20<\/strong> 条/)
-})
+test('前端静态资源：app.js/app.css 契约（无外链、无 innerHTML、设计 token 与组件类）', () => {
+  const js = readFileSync(join(ROOT, 'lib', 'app.js'), 'utf8')
+  const css = readFileSync(join(ROOT, 'lib', 'app.css'), 'utf8')
 
-test('超长转录：单页 HTML ≤2MB 并截断说明', async (t) => {
-  setup(t)
-  const chunk = 'x'.repeat(600)
-  writeCacheFixture({
-    videoId: 'webhuge0001',
-    title: 'Huge Transcript',
-    segments: Array.from({ length: 5000 }, (_unused, index) => ({ start: index * 2, text: chunk })),
-  })
-  const base = await startServer(t)
-  const { response, text } = await request(base, '/tube-insight/v/webhuge0001')
-  assert.equal(response.status, 200)
-  const bytes = Buffer.byteLength(text, 'utf8')
-  assert.ok(bytes <= MAX_PAGE_BYTES, `单页应 ≤2MB，实际 ${bytes} bytes`)
-  assert.match(text, /本页已截断显示前 \d+ \/ 5000 段/)
-  assert.match(text, /class="ti-segment"/)
+  assert.ok(!js.includes('innerHTML'), 'app.js 不应使用 innerHTML')
+  assert.ok(js.includes('textContent'), 'app.js 应使用 textContent 渲染动态文本')
+  assert.ok(!/src\s*=\s*['"]https?:/.test(js), 'app.js 不应加载外部资源')
+  assert.ok(!/@import/.test(css), 'app.css 不应 @import 外部样式')
+  assert.ok(!/url\(\s*['"]?https?:/.test(css), 'app.css 不应引用外部 url()')
+
+  // 设计系统 token 与组件类（共享设计系统 §0）
+  const compact = css.replace(/\s+/g, '')
+  for (const needle of ['--bg:#f6f4ef', '--panel:#ffffff', '--text:#1c1a17', '--accent:#e8552f', '--accent-2:#f59e0b', 'html[data-theme="dark"]', '--bg:#0d1017']) {
+    assert.ok(compact.includes(needle), `app.css 缺少 token：${needle}`)
+  }
+  for (const cls of ['.topbar', '.toolbar', '.search', '.list', '.card', '.row', '.badge', '.btn', '.toast', '.empty', '.skeleton', '.detail', '.tabs', '.tab', '.tabpanel', '.seg']) {
+    assert.ok(css.includes(cls), `app.css 缺少组件类：${cls}`)
+  }
+  assert.ok(/@media\s*\(max-width:\s*900px\)/.test(css), '应有移动端布局')
+
+  // SPA 功能覆盖面（找回原扩展能力）
+  for (const needle of [
+    'transcript-search',
+    'match-count',
+    'copy-citation',
+    'copy-text',
+    'save-note',
+    'chapter-list',
+    'action-grid',
+    'data-action',
+    'notes-list',
+    'localStorage',
+    'compare-bar',
+    'start-session',
+    'exportTranscriptPrompt',
+    'comparePrompt',
+    'organizeNotesPrompt',
+    'data-theme',
+  ]) {
+    assert.ok(js.includes(needle), `app.js 缺少功能：${needle}`)
+  }
+  assert.equal(BASE, '/tube-insight')
 })
