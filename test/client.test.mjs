@@ -32,10 +32,10 @@ test('client.js 静态契约：ModuleLoader 格式 / 侧栏 / iframe', () => {
     "const PANEL = 'tube-insight'",
     "const SRC = '/tube-insight/'",
     'order: 7',
-    "label: () => '视频库'",
+    "label: () => 'TubeInsight'",
     'ctx.slots.register({ name: \'main\', key: PANEL }, VideoPanel)',
     "'iframe'",
-    "title: 'TubeInsight 视频库'",
+    "title: 'TubeInsight'",
     "width: '100%'",
     "height: '100%'",
     'border: 0',
@@ -103,7 +103,7 @@ test('client.js 用 __ModuleLoader__ 装载后注册侧栏图标与 iframe 面�
   assert.equal(sidebar.spec.id, 'tube-insight')
   assert.equal(sidebar.spec.order, 7)
   assert.equal(typeof sidebar.spec.label, 'function')
-  assert.equal(sidebar.spec.label(), '视频库')
+  assert.equal(sidebar.spec.label(), 'TubeInsight')
   const icon = sidebar.component({ size: 20 })
   assert.equal(icon.type, 'svg')
   assert.equal(icon.props.width, 20)
@@ -116,7 +116,7 @@ test('client.js 用 __ModuleLoader__ 装载后注册侧栏图标与 iframe 面�
   const panel = main.component()
   assert.equal(panel.type, 'iframe')
   assert.equal(panel.props.src, '/tube-insight/')
-  assert.equal(panel.props.title, 'TubeInsight 视频库')
+  assert.equal(panel.props.title, 'TubeInsight')
   assert.equal(panel.props.style.width, '100%')
   assert.equal(panel.props.style.height, '100%')
   assert.equal(panel.props.style.border, 0)
