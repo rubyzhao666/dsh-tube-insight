@@ -1,0 +1,4 @@
+# tube-insight：Host 半边（工具 + 随包 skill）。由 package.json 的 dsh.bundle.patch 引入。
+- insert:
+    - id: tube-insight
+      name: 'dsh-tube-insight'

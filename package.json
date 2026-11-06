@@ -1,0 +1,49 @@
+{
+  "name": "dsh-tube-insight",
+  "version": "0.1.0",
+  "description": "Fetch YouTube transcripts, segment them into readable timestamped paragraphs, and export them as cited Markdown notes with DeepSeek Harness.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "lib",
+    "skills",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "youtube",
+    "transcript",
+    "tube-insight",
+    "subtitles",
+    "markdown"
+  ],
+  "author": "rubyzhao666",
+  "license": "MIT",
+  "homepage": "https://github.com/rubyzhao666/dsh-tube-insight",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rubyzhao666/dsh-tube-insight.git"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check lib/index.js && node --check lib/tools.js && node --check lib/transcript.js && node --check lib/export.js",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}
