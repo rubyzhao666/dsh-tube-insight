@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "TubeInsight 视频洞察",
-    "description": "抓取 YouTube 原生/自动字幕并整理成语义分段，把视频变成可读笔记、产品情报、洞察与 PRD，导出带 [MM:SS] 时间戳引用的 Markdown。"
+    "description": "Ruby 出品 · DSH 插件：抓取 YouTube 原生/自动字幕并整理成语义分段，把视频变成可读笔记、产品情报、洞察与 PRD，导出带 [MM:SS] 时间戳引用的 Markdown。"
   }
 }

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "TubeInsight",
-    "description": "Fetch YouTube native/auto captions as readable semantic segments, then turn videos into cited Markdown notes, product intel, insights and PRD drafts with [MM:SS] timestamps."
+    "description": "By Ruby · DSH plugin: Fetch YouTube native/auto captions as readable semantic segments, then turn videos into cited Markdown notes, product intel, insights and PRD drafts with [MM:SS] timestamps."
   }
 }
