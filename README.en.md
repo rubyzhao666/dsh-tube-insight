@@ -13,6 +13,7 @@ Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insig
 - **Cross-video search** (0.2.0): `tube_search` searches the transcripts of **all videos you have previously fetched** (BM25 + contiguous-phrase boost, English/CJK tokenization) and returns the video, `[MM:SS]` timestamp, original snippet and a jump link — for "what did the videos I watched say about X?" and topic reviews. It searches the local cache only, never the whole web.
 - **Topic brief** (0.3.0): `tube_synthesis` runs 1–7 search terms (`query` + `queries`) over your cached videos, merges/dedupes by (video, timestamp), groups by video and trims the result — returning a fixed-structure **evidence brief** (every item with `[MM:SS]` and a jump link, plus zero-hit videos and coverage stats). Pass `dir` to save it as Markdown with frontmatter (module=knowledge), a sources block and an updated `index.md`; the model writes the review from the brief without copying citations by hand.
 - **Bundled skill**: the `tube-insight` skill ships overview / intel / insights / prd / compare / knowledge / translation workflows plus citation rules.
+- **Sidebar "Video Library"** (0.4.0): the DSH Web sidebar gets a "视频库" entry whose main area is the read-only page `/tube-insight/` — cached video list (title/channel/duration/segments/fetched time), server-side subtitle search via `?q=` (with `[MM:SS]`, snippets and jump links), and a per-video transcript page `/tube-insight/v/<videoId>` (metadata, chapters, full `[MM:SS]` transcript). Rendered by the host with no frontend build, no external resources and no writes; restart the DSH App for the entry to appear.
 
 Limits: caption-only (native or auto-generated) — no ASR transcription; private/restricted videos are rejected with an actionable error.
 
@@ -44,6 +45,16 @@ Just talk to the agent:
 > **No tool names to memorize**: the `tube_transcript` / `tube_search` / `tube_synthesis` / `tube_export` names below are internal function names the model calls. Just describe what you want in natural language; the bundled skill picks the right action. Calling it "TubeInsight" or "that YouTube thing" works too.
 
 The model calls the tools first, then follows the bundled skill workflow. `tube_search` **only searches videos you have already fetched with `tube_transcript`**: an empty cache produces an actionable error telling you to fetch a video first; it never searches the whole web.
+
+### Video Library page (0.4.0)
+
+After installing and **restarting the DSH App**, the sidebar shows a "视频库" entry that opens `/tube-insight/` in the main area:
+
+- Home: cache stats + cached video list (newest first) + search box; search uses `GET /tube-insight/?q=<terms>` (server-side lexical search, at most 20 results).
+- Transcript page: `GET /tube-insight/v/<11-char videoId>` with title/channel/duration/caption language/chapters/full transcript; every segment has a `[MM:SS]` link that jumps to that moment on YouTube.
+- Read-only: only `GET/HEAD` (other methods → 405); unknown paths, invalid videoIds and uncached videos → 404; corrupt cache files are skipped; every cached string and the query are HTML-escaped; the page loads no external resources (YouTube appears only as outbound links).
+
+> The page is for browsing; fetching/searching/analysis still happen in the conversation through the tools and the skill.
 
 ### Tool signatures
 
@@ -141,6 +152,8 @@ Export directories are chosen with the `dir` parameter (default `~/TubeInsight`)
 
 `tube_search` is **read-only** over `cache/`: it writes no files, makes no network requests and creates no new data directories. When the cache holds more than 500 videos it scans only the 500 most recent (by `fetchedAt`) and reports `truncated: true`; fetch/refresh a video with `tube_transcript` before searching for the latest content.
 
+The Video Library page (`/tube-insight/`) is read-only over `cache/` too and adds no data directories; its HTML is rendered on demand by the host and never written to disk.
+
 `tube_synthesis` is read-only by default too; it only writes to the export directory when `dir` is given (reusing the `tube_export` pipeline: frontmatter module=knowledge, sources block, `index.md`, duplicate names numbered).
 
 ## Export format
@@ -181,7 +194,7 @@ npm pack --dry-run               # check the files list
 node scripts/smoke.mjs           # real fetch of one video (network), writes under $DSH_HOME/tube-insight/
 ```
 
-Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), topic briefs (multi-term merge & dedupe / grouping & truncation / fixed structure / frontmatter + index on disk / determinism / error paths), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
+Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), topic briefs (multi-term merge & dedupe / grouping & truncation / fixed structure / frontmatter + index on disk / determinism / error paths), Video Library pages (HTML contract / XSS escaping / 404·405·HEAD / corrupt cache / empty-cache guidance / search limit 20 / ≤2MB page truncation), the sidebar client half (package.json declaration / `node --check` / simulated `__ModuleLoader__` mount / iframe & icon), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
 
 ## Privacy & license
 

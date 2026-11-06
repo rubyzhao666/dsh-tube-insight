@@ -13,6 +13,7 @@
 - **跨视频检索**（0.2.0）：`tube_search` 在**你以前抓取过的所有视频**的转录里检索关键词（BM25 + 连续短语加成，中英文/CJK 分词），返回视频、`[MM:SS]` 时间戳、原文片段和可跳转链接，适合「我以前看过的视频里关于 X 是怎么说的」和主题综述。只搜本机缓存，不是全网搜索。
 - **主题综述底稿**（0.3.0）：`tube_synthesis` 一次对 1–7 个检索词（`query` + `queries`）分别检索已缓存视频，按「视频 + 时间戳」合并去重、按视频分组截断，直接产出固定结构的**证据底稿**（每条带 `[MM:SS]` 与可跳转链接、未命中视频、覆盖统计）；给了 `dir` 还能一键落盘为带 frontmatter（module=knowledge）、来源区块和 `index.md` 的 Markdown。模型基于底稿写综述，引用不用手抄。
 - **随包 skill**：`tube-insight` skill 提供 overview / intel / insights / prd / compare / knowledge / translation 七种工作流与引用铁律，模型按需加载。
+- **左侧栏「视频库」**（0.4.0）：DSH Web 左侧栏多一个「视频库」入口，主区域是只读页面 `/tube-insight/`——缓存视频列表（标题/频道/时长/段数/抓取时间）、服务端字幕检索 `?q=`（`[MM:SS]` + 原文片段 + 跳转链接）、单视频转录页 `/tube-insight/v/<videoId>`（元数据、章节、完整 `[MM:SS]` 转录）。页面由 Host 直接渲染，无前端构建、无外部资源、不写盘；重启 DSH App 后入口才会出现。
 
 边界：只处理**有字幕（原生或自动生成）**的视频，不做语音转写（ASR）；不做登录后才能看的私享视频。
 
@@ -44,6 +45,16 @@ plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 > **不用记工具名**：本节提到的 `tube_transcript` / `tube_search` / `tube_synthesis` / `tube_export` 是模型内部调用的函数名，不是你要说的话。你只需要用自然语言说出目的，模型会根据随包 skill 自动选对动作；叫它「TubeInsight」或「看视频那个功能」都可以。
 
 模型会先调用工具拿字幕，再按 skill 的工作流产出内容。`tube_search` **只搜你以前用 `tube_transcript` 抓过的视频**：缓存为空时会报错并提示先抓取视频，不会去搜全网。
+
+### 视频库页面（0.4.0）
+
+安装并**重启 DSH App** 后，左侧栏出现「视频库」入口，主区域打开 `/tube-insight/`：
+
+- 首页：缓存统计 + 视频列表（按抓取时间倒序）+ 搜索框；搜索走 `GET /tube-insight/?q=<关键词>`（服务端词法检索，最多 20 条结果）。
+- 转录页：`GET /tube-insight/v/<11 位 videoId>`，含标题/频道/时长/字幕语言/章节/完整转录，每段 `[MM:SS]` 可直接跳到 YouTube 对应时间。
+- 只读：仅支持 `GET/HEAD`（其它方法 405）；未知路径/非法 videoId/未缓存视频 404；损坏缓存自动跳过；所有缓存文本与 query 都做 HTML 转义；页面不加载任何外部资源（YouTube 只是跳转链接）。
+
+> 页面是「看和翻」用的；抓取/检索/分析仍在对话里由模型调用工具与 skill 完成。
 
 ### 工具签名
 
@@ -143,6 +154,8 @@ $DSH_HOME/tube-insight/
 
 `tube_search` **只读** `cache/` 目录：不写任何文件、不发网络请求、不新增数据目录。缓存超过 500 条时只扫描最近 500 个视频（按 `fetchedAt`），并在返回里标记 `truncated: true`。想搜最新内容前，先用 `tube_transcript` 抓取/刷新对应视频。
 
+视频库页面（`/tube-insight/`）同样只读 `cache/`，不新增任何数据目录；页面 HTML 由 Host 现渲染，不落盘。
+
 `tube_synthesis` 默认也只读缓存；只有传 `dir` 时才写导出目录（复用 `tube_export` 的导出管线：frontmatter module=knowledge、文末来源、`index.md`，重名自动加序号）。
 
 ## 导出格式
@@ -183,7 +196,7 @@ npm pack --dry-run               # 检查 files 完整性
 node scripts/smoke.mjs           # 真实抓一个视频（需要网络），产物写 $DSH_HOME/tube-insight/
 ```
 
-测试覆盖：插件形状、工具注册、skill provider（`skills/` 不存在也不报错）、URL 解析、语义分段、章节解析、缓存往返、导出格式、跨视频检索（分词/BM25/短语加成/video·since·limit·context 过滤/坏缓存跳过/500 条截断/性能 100 视频 5 万段 <2s）、综述底稿（多词合并去重/分组截断/固定结构/落盘 frontmatter+index/确定性/错误路径）、工具 happy path + 各种错误路径（无字幕 / 年龄限制 / 网络失败 / Supadata key 无效 / 参数错误）。
+测试覆盖：插件形状、工具注册、skill provider（`skills/` 不存在也不报错）、URL 解析、语义分段、章节解析、缓存往返、导出格式、跨视频检索（分词/BM25/短语加成/video·since·limit·context 过滤/坏缓存跳过/500 条截断/性能 100 视频 5 万段 <2s）、综述底稿（多词合并去重/分组截断/固定结构/落盘 frontmatter+index/确定性/错误路径）、视频库页面（HTML 契约/XSS 转义/404·405·HEAD/损坏缓存/空缓存引导/检索 limit 20/单页 ≤2MB 截断）、侧栏 client 半边（package.json 声明/`node --check`/`__ModuleLoader__` 装载模拟/iframe 与图标）、工具 happy path + 各种错误路径（无字幕 / 年龄限制 / 网络失败 / Supadata key 无效 / 参数错误）。
 
 ## 隐私与许可
 

@@ -14,6 +14,7 @@ function fakeCtx() {
   const tools = new Map()
   const providers = []
   const effects = []
+  const webServers = []
   const ctx = {
     effect(fn) {
       const cleanup = fn()
@@ -32,14 +33,20 @@ function fakeCtx() {
         return () => {}
       },
     },
+    webServer: {
+      register(options) {
+        webServers.push(options)
+        return () => {}
+      },
+    },
     logger: { info() {}, warn() {}, error() {} },
   }
-  return { ctx, tools, providers, effects }
+  return { ctx, tools, providers, effects, webServers }
 }
 
 test('exports the host plugin shape', () => {
   assert.equal(name, 'tube-insight')
-  assert.deepEqual(inject, ['tools', 'skills'])
+  assert.deepEqual(inject, ['tools', 'skills', 'webServer'])
   assert.equal(typeof apply, 'function')
 })
 
@@ -64,13 +71,17 @@ test('package.json 符合硬规则（ESM、零依赖、files 完整）', () => {
   assert.equal(PLUGIN_VERSION, pkg.version)
 })
 
-test('apply 注册全部工具与一个 skill provider', () => {
-  const { ctx, tools, providers, effects } = fakeCtx()
+test('apply 注册全部工具、一个 skill provider 与 /tube-insight 只读页面', () => {
+  const { ctx, tools, providers, effects, webServers } = fakeCtx()
   apply(ctx)
   assert.equal(tools.size, TOOLS.length)
   assert.equal(providers.length, 1)
   assert.equal(providers[0].name, 'tube-insight')
-  assert.ok(effects.length >= TOOLS.length + 1)
+  assert.equal(webServers.length, 1)
+  assert.equal(webServers[0].kind, 'prefix')
+  assert.equal(webServers[0].path, '/tube-insight')
+  assert.equal(typeof webServers[0].handler, 'function')
+  assert.ok(effects.length >= TOOLS.length + 2)
   for (const tool of TOOLS) assert.ok(tools.get(tool.name), `missing tool ${tool.name}`)
 })
 

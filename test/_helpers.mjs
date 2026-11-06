@@ -261,8 +261,10 @@ export function fixture(id, overrides = {}) {
 }
 
 /**
- * 写一条 tube_search 用的缓存 fixture（结构与 lib/transcript.js 写出的记录一致）。
- * @param {{videoId: string, title?: string, channel?: string, durationSeconds?: number, fetchedAt?: string, segments: Array<{start:number,text:string}>}} options
+ * 写一条缓存 fixture（结构与 lib/transcript.js 写出的记录一致）。
+ * @param {{videoId: string, title?: string, channel?: string, durationSeconds?: number, fetchedAt?: string,
+ *          language?: string, captionKind?: 'native'|'asr', source?: string, chapters?: Array<{title:string,startSeconds:number}>,
+ *          segments: Array<{start:number,text:string}>}} options
  */
 export function writeCacheFixture(options) {
   const {
@@ -271,6 +273,10 @@ export function writeCacheFixture(options) {
     channel = 'Fixture Channel',
     durationSeconds = 600,
     fetchedAt = '2026-01-01T00:00:00.000Z',
+    language = 'en',
+    captionKind = 'asr',
+    source = 'fixture',
+    chapters = [],
     segments,
   } = options
   const paths = cachePaths(videoId)
@@ -282,13 +288,13 @@ export function writeCacheFixture(options) {
     channel,
     durationSeconds,
     description: '',
-    language: 'en',
-    captionKind: 'asr',
-    source: 'fixture',
+    language,
+    captionKind,
+    source,
     fetchedAt,
     segmentCount: segments.length,
     charCount: segments.reduce((sum, segment) => sum + segment.text.length, 0),
-    chapters: [],
+    chapters,
     segments,
   }
   writeFileSync(paths.json, JSON.stringify(record), 'utf8')
