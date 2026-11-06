@@ -40,6 +40,9 @@ Just talk to the agent:
 - **Topic review**: "Search everything I have cached about pricing / model evaluation and turn it into one knowledge card" → `tube_search` for evidence → skill workflow → `tube_export` (module=knowledge or insights).
 - **Write a topic review**: "Turn what the videos I watched say about AI products into one review" → `tube_synthesis` gathers the evidence brief in one call (optionally saved to disk) → the model writes the review (consensus / disagreements / gaps) using the brief links as-is.
 
+
+> **No tool names to memorize**: the `tube_transcript` / `tube_search` / `tube_synthesis` / `tube_export` names below are internal function names the model calls. Just describe what you want in natural language; the bundled skill picks the right action. Calling it "TubeInsight" or "that YouTube thing" works too.
+
 The model calls the tools first, then follows the bundled skill workflow. `tube_search` **only searches videos you have already fetched with `tube_transcript`**: an empty cache produces an actionable error telling you to fetch a video first; it never searches the whole web.
 
 ### Tool signatures

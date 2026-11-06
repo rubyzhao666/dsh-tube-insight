@@ -40,6 +40,9 @@ plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 - **主题综述**：「把我缓存里所有视频里关于 pricing / 模型评估的内容找出来，整理成一篇知识卡片」→ `tube_search` 取证 → 按 skill 汇总 → `tube_export`（module=knowledge 或 insights）存档。
 - **整理成主题综述**：「把我看过的视频里关于 AI 产品的说法整理成一篇综述」→ `tube_synthesis` 一次多词检索拿到底稿（可选一键落盘）→ 模型基于底稿写综述（共识/分歧/覆盖缺口），引用直接沿用底稿链接。
 
+
+> **不用记工具名**：本节提到的 `tube_transcript` / `tube_search` / `tube_synthesis` / `tube_export` 是模型内部调用的函数名，不是你要说的话。你只需要用自然语言说出目的，模型会根据随包 skill 自动选对动作；叫它「TubeInsight」或「看视频那个功能」都可以。
+
 模型会先调用工具拿字幕，再按 skill 的工作流产出内容。`tube_search` **只搜你以前用 `tube_transcript` 抓过的视频**：缓存为空时会报错并提示先抓取视频，不会去搜全网。
 
 ### 工具签名
