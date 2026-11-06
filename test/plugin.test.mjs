@@ -90,9 +90,23 @@ test('工具定义符合 Host API 契约', () => {
     assert.ok(Array.isArray(tool.output.schema.required))
     assert.equal(typeof tool.output.render, 'function')
     assert.equal(typeof tool.execute, 'function')
-    assert.ok(Number.isFinite(tool.timeoutMs) && tool.timeoutMs >= 120_000, `${tool.name} timeoutMs 应给足长任务时间`)
+    assert.ok(Number.isFinite(tool.timeoutMs) && tool.timeoutMs >= 10_000, `${tool.name} timeoutMs 应给出合理超时`)
   }
-  assert.deepEqual([...names].sort(), ['tube_export', 'tube_transcript'])
+  // 网络类工具的超时给足；本地检索工具只需覆盖性能目标
+  for (const networkTool of ['tube_transcript', 'tube_export']) {
+    const tool = TOOLS.find((item) => item.name === networkTool)
+    assert.ok(tool.timeoutMs >= 120_000, `${networkTool} 应给足长任务超时`)
+  }
+  assert.deepEqual([...names].sort(), ['tube_export', 'tube_search', 'tube_transcript'])
+})
+
+test('tube_search 工具描述写明只搜已缓存视频', () => {
+  const searchTool = TOOLS.find((tool) => tool.name === 'tube_search')
+  assert.ok(searchTool, '应注册 tube_search')
+  assert.match(searchTool.description, /以前抓取过|已缓存/)
+  assert.match(searchTool.description, /不是全网搜索/)
+  assert.deepEqual(searchTool.parameters.required, ['query'])
+  assert.equal(searchTool.parameters.properties.query.maxLength, 200)
 })
 
 test('render 返回非空 text 且不抛错（模型观察面）', () => {
@@ -137,6 +151,39 @@ test('render 返回非空 text 且不抛错（模型观察面）', () => {
     },
   )
   assert.ok(Array.isArray(exportRender) && exportRender[0].text.includes('/tmp/out/note.md'))
+
+  const searchTool = TOOLS.find((tool) => tool.name === 'tube_search')
+  const searchRender = searchTool.output.render(
+    { query: '模型' },
+    {
+      query: '模型',
+      scannedVideos: 3,
+      matchedVideos: 1,
+      resultCount: 1,
+      scannedSegments: 500,
+      elapsedMs: 12,
+      results: [
+        {
+          videoId: 'zjkBMFhNj_g',
+          title: 'Intro',
+          channel: 'Karpathy',
+          url: 'https://www.youtube.com/watch?v=zjkBMFhNj_g',
+          startSeconds: 754,
+          timestamp: '12:34',
+          link: 'https://youtu.be/zjkBMFhNj_g?t=754',
+          text: '这里提到了模型训练。',
+          score: 1.23,
+          matchedTerms: ['模型'],
+          before: '前一段',
+          after: '后一段',
+        },
+      ],
+    },
+  )
+  assert.match(searchRender[0].text, /\[12:34\]/)
+  assert.match(searchRender[0].text, /youtu\.be\/zjkBMFhNj_g\?t=754/)
+  assert.match(searchRender[0].text, /tube_export/)
+  assert.match(searchRender[0].text, /read/)
 })
 
 test('随包 skill provider：skills/ 目录不存在也不报错', async () => {

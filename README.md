@@ -1,6 +1,6 @@
 # dsh-tube-insight
 
-> 在 DeepSeek Harness 里把 YouTube 视频变成**可引用、可归档的中文知识**：抓字幕 → 语义分段 → 带 `[MM:SS]` 时间戳的分析 → 导出 Markdown。
+> 在 DeepSeek Harness 里把 YouTube 视频变成**可引用、可归档、可检索的中文知识**：抓字幕 → 语义分段 → 跨视频检索 → 带 `[MM:SS]` 时间戳的分析 → 导出 Markdown。
 
 基于 [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insight)（MIT，作者 Zara Zhang）改造成 DSH 插件。上游是 Chrome 扩展（侧边栏 + Supabase/Supadata + 另配大模型 API key）；本插件把「确定性重活」搬到 Host（抓字幕、分段、落盘、导出），**分析/写作交给当前会话的模型本身**——不需要第二个 API key，也不会双份计费。
 
@@ -10,6 +10,7 @@
 - **可读分段**：把逐条自动字幕合并成完整句子和可读段落（按停顿 >2 秒或句末标点 + 长度上限切段），每段保留起始秒；同时写一份带 `[MM:SS]` 的 Markdown 供模型 `read`。
 - **章节解析**：从视频描述的 `00:00 标题` 时间戳解析章节（≥2 条才采用）。
 - **导出归档**：`tube_export` 把模型写好的正文变成带 YAML frontmatter、文末「来源」时间戳链接的 Markdown，落盘并维护同目录 `index.md`（按 module 分组）。
+- **跨视频检索**（0.2.0）：`tube_search` 在**你以前抓取过的所有视频**的转录里检索关键词（BM25 + 连续短语加成，中英文/CJK 分词），返回视频、`[MM:SS]` 时间戳、原文片段和可跳转链接，适合「我以前看过的视频里关于 X 是怎么说的」和主题综述。只搜本机缓存，不是全网搜索。
 - **随包 skill**：`tube-insight` skill 提供 overview / intel / insights / prd / compare / knowledge / translation 七种工作流与引用铁律，模型按需加载。
 
 边界：只处理**有字幕（原生或自动生成）**的视频，不做语音转写（ASR）；不做登录后才能看的私享视频。
@@ -22,7 +23,7 @@
 plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 ```
 
-或使用 DSH 的 Plugins 界面添加本地目录。安装后应能看到 `tube_transcript`、`tube_export` 两个工具和 `tube-insight` skill。
+或使用 DSH 的 Plugins 界面添加本地目录。安装后应能看到 `tube_transcript`、`tube_search`、`tube_export` 三个工具和 `tube-insight` skill。
 
 前置条件：Node.js `^22.19.0 || >=24.0.0`，DSH `>=0.2.1-rc.2 <0.3.0`。**不需要** Chrome 扩展、不需要 Supadata/Supabase 才能抓原生字幕（Supadata 只是可选兜底）。
 
@@ -34,8 +35,10 @@ plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 - 「把这个视频整理成产品情报 / 洞察笔记 / PRD 草稿」
 - 「对比这两个视频的差异，存到我的笔记目录」
 - 「把上面内容导出成 Markdown，放到 <工作区绝对路径>」
+- **找回忆**：「我以前看过的视频里，关于 LLM 训练数据是怎么说的？」→ 模型调用 `tube_search` 拿回带时间戳的原话，再把有用片段整理给你；需要展开某条时它会 `read` 对应缓存全文。
+- **主题综述**：「把我缓存里所有视频里关于 pricing / 模型评估的内容找出来，整理成一篇知识卡片」→ `tube_search` 取证 → 按 skill 汇总 → `tube_export`（module=knowledge 或 insights）存档。
 
-模型会先调用工具拿字幕，再按 skill 的工作流产出内容。
+模型会先调用工具拿字幕，再按 skill 的工作流产出内容。`tube_search` **只搜你以前用 `tube_transcript` 抓过的视频**：缓存为空时会报错并提示先抓取视频，不会去搜全网。
 
 ### 工具签名
 
@@ -50,6 +53,20 @@ plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 | `inline` | boolean，默认 false | true 时把全文放进返回值（约 60k 字符上限，超出截断）；默认只回预览 + 路径 |
 
 返回：`videoId, title, channel, durationSeconds, publishedAt?, language, captionKind(native|asr), source, segmentCount, charCount, chapters[], transcriptPath, cacheJsonPath, fetchedAt, cached, preview{head,tail}, inlineText?, truncated?`。
+
+`tube_search`（0.2.0，跨视频检索）
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `query` | string，必填 | 检索词，1–200 字符，支持中英文混合 |
+| `video` | string，可选 | 只搜这一条视频（URL 或 11 位 ID）；解析不了/不在缓存里会报错 |
+| `since` | string，可选 | 只搜缓存时间（`fetchedAt`）不早于该日期的视频，ISO 日期 `YYYY-MM-DD` |
+| `limit` | number，可选 | 1–20，默认 8（>20 按 20 处理） |
+| `context` | number，可选 | 0–2，默认 1：命中段前后各返回几段作为 `before`/`after` |
+
+返回：`query, scannedVideos, matchedVideos, resultCount, scannedSegments, elapsedMs, results[], truncated?, skippedCacheFiles?`；
+每条结果含 `videoId, title, channel, url, startSeconds, timestamp, link, text, score, matchedTerms, before?, after?`。
+打分用 BM25（k1=1.2、b=0.75）+ query 连续短语 ×1.8；English 按词匹配，中文连续片段按 bigram 匹配。缓存超过 500 条时只扫最近 500 个视频（`truncated: true`）；损坏的缓存文件自动跳过、不影响检索。
 
 `tube_export`
 
@@ -103,6 +120,8 @@ $DSH_HOME/tube-insight/
 
 用户导出目录由 `tube_export` 的 `dir` 参数指定（默认 `~/TubeInsight`）。缓存永久有效，`refresh=true` 重抓；重复调用先查缓存（幂等）。
 
+`tube_search` **只读** `cache/` 目录：不写任何文件、不发网络请求、不新增数据目录。缓存超过 500 条时只扫描最近 500 个视频（按 `fetchedAt`），并在返回里标记 `truncated: true`。想搜最新内容前，先用 `tube_transcript` 抓取/刷新对应视频。
+
 ## 导出格式
 
 ```markdown
@@ -110,7 +129,7 @@ $DSH_HOME/tube-insight/
 title: "…"
 module: "overview"
 generated_at: "2026-11-06T01:43:44.724Z"
-generator: "dsh-tube-insight@0.1.0"
+generator: "dsh-tube-insight@0.2.0"
 source:
   - title: "…"
     channel: "…"
@@ -141,7 +160,7 @@ npm pack --dry-run               # 检查 files 完整性
 node scripts/smoke.mjs           # 真实抓一个视频（需要网络），产物写 $DSH_HOME/tube-insight/
 ```
 
-测试覆盖：插件形状、工具注册、skill provider（`skills/` 不存在也不报错）、URL 解析、语义分段、章节解析、缓存往返、导出格式、工具 happy path + 各种错误路径（无字幕 / 年龄限制 / 网络失败 / Supadata key 无效 / 参数错误）。
+测试覆盖：插件形状、工具注册、skill provider（`skills/` 不存在也不报错）、URL 解析、语义分段、章节解析、缓存往返、导出格式、跨视频检索（分词/BM25/短语加成/video·since·limit·context 过滤/坏缓存跳过/500 条截断/性能 100 视频 5 万段 <2s）、工具 happy path + 各种错误路径（无字幕 / 年龄限制 / 网络失败 / Supadata key 无效 / 参数错误）。
 
 ## 隐私与许可
 

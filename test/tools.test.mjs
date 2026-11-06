@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { TOOLS } from '../lib/tools.js'
 import { cachePaths } from '../lib/paths.js'
+import { PLUGIN_VERSION } from '../lib/version.js'
 import {
   assertMatchesSchema,
   createYouTubeMock,
@@ -301,7 +302,7 @@ test('tube_export happy path：frontmatter、来源区块、index.md、缓存自
   assert.ok(content.startsWith('---\n'))
   assert.match(content, /title: "LLM 视频概览"/)
   assert.match(content, /module: "overview"/)
-  assert.match(content, /generator: "dsh-tube-insight@0\.1\.0"/)
+  assert.ok(content.includes(`generator: "dsh-tube-insight@${PLUGIN_VERSION}"`), `generator 应为当前包版本 ${PLUGIN_VERSION}`)
   assert.match(content, /videoId: "zjkBMFhNj_g"/)
   assert.match(content, /videoId: "jNQXAC9IVRw"/)
   assert.match(content, /## 我的笔记\n\n- 第一遍看训练部分\n- 后续补对比/)

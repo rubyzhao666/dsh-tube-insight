@@ -1,9 +1,10 @@
 // 测试辅助：临时 DSH_HOME、假 YouTube 网络、JSON Schema 断言。
 // 注意：文件名以 _ 开头，不会被 `node --test test/*.test.mjs` 当成测试文件。
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { cacheDir, cachePaths } from '../lib/paths.js'
 
 /** 建一个临时 $DSH_HOME，返回 { dir, restore }；restore 会清理环境变量与目录。 */
 export function makeTempDshHome() {
@@ -257,4 +258,48 @@ export function fixture(id, overrides = {}) {
     kind: 'asr',
     ...overrides,
   }
+}
+
+/**
+ * 写一条 tube_search 用的缓存 fixture（结构与 lib/transcript.js 写出的记录一致）。
+ * @param {{videoId: string, title?: string, channel?: string, durationSeconds?: number, fetchedAt?: string, segments: Array<{start:number,text:string}>}} options
+ */
+export function writeCacheFixture(options) {
+  const {
+    videoId,
+    title = 'Fixture Video',
+    channel = 'Fixture Channel',
+    durationSeconds = 600,
+    fetchedAt = '2026-01-01T00:00:00.000Z',
+    segments,
+  } = options
+  const paths = cachePaths(videoId)
+  mkdirSync(paths.dir, { recursive: true })
+  const record = {
+    version: 1,
+    videoId,
+    title,
+    channel,
+    durationSeconds,
+    description: '',
+    language: 'en',
+    captionKind: 'asr',
+    source: 'fixture',
+    fetchedAt,
+    segmentCount: segments.length,
+    charCount: segments.reduce((sum, segment) => sum + segment.text.length, 0),
+    chapters: [],
+    segments,
+  }
+  writeFileSync(paths.json, JSON.stringify(record), 'utf8')
+  return record
+}
+
+/** 在缓存目录写一个任意内容的 .json 文件（用于损坏缓存测试）。 */
+export function writeRawCacheFile(fileName, content) {
+  const dir = cacheDir()
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, fileName)
+  writeFileSync(file, content, 'utf8')
+  return file
 }

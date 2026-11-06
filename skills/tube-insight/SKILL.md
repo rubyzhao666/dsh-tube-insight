@@ -1,13 +1,13 @@
 ---
 name: tube-insight
-description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了什么、视频洞察、视频转笔记、产品情报、竞品/多视频对比、视频转 PRD、字幕翻译与双语，产出带 [MM:SS] 可跳转引用、可存档的 Markdown。
+description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了什么、视频洞察、视频转笔记、产品情报、竞品/多视频对比、视频转 PRD、字幕翻译与双语，以及在用户以前抓过的视频里回忆/检索和做主题综述，产出带 [MM:SS] 可跳转引用、可存档的 Markdown。
 ---
 
 # TubeInsight：把 YouTube 视频变成知识资产
 
-> 移植自 TubeInsight Chrome 扩展（MIT，rubyzhao666/tube-insight）。原版用 Supadata 抓字幕、用 DeepSeek API 做分析；在 DSH 里，抓字幕由 `tube_transcript` 完成，分析由**你**完成，所以不需要第二个 API key，也不额外计费。
+> 移植自 TubeInsight Chrome 扩展（MIT，rubyzhao666/tube-insight）。原版用 Supadata 抓字幕、用 DeepSeek API 做分析；在 DSH 里，抓字幕由 `tube_transcript` 完成，跨视频回忆/检索由 `tube_search` 完成，分析由**你**完成，所以不需要第二个 API key，也不额外计费。
 
-这个 skill 解决一件事：用户扔来一条或多条 YouTube 视频，你把它变成用户想要的形态——概览、产品情报、行业洞察、PRD 草稿、横向对比、知识卡片、翻译、笔记。**核心纪律：每条结论都能回到视频原文的具体时间点。** 做不到这一点，这个 skill 视为不合格。
+这个 skill 解决两件事：用户扔来一条或多条 YouTube 视频，你把它变成用户想要的形态——概览、产品情报、行业洞察、PRD 草稿、横向对比、知识卡片、翻译、笔记；或者用户问「我以前看过的视频里关于 X 都怎么说的」，你在本地缓存的视频库检索、核实并写成主题综述。**核心纪律：每条结论都能回到视频原文的具体时间点。** 做不到这一点，这个 skill 视为不合格。
 
 ## 何时触发
 
@@ -15,6 +15,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 
 - 贴出 YouTube 链接（`youtube.com/watch?v=...`、`youtu.be/...`、`youtube.com/shorts/...`）或 11 位视频 ID，让你看/总结/分析/翻译这条视频；
 - 说「这条视频讲了什么」「帮我看看这个视频」「视频字幕」「视频转笔记」「视频洞察」；
+- 说「我以前看过的视频里…」「我记得有个视频说…」「把看过的视频里关于 X 的观点汇总」「搜一下我抓过的视频」——用户指的是**以前抓过、看过**的视频，不是新链接（走模式 0）；
 - 说「产品情报」「竞品视频分析」「这个产品怎么样」「提炼一下方法论」；
 - 说「多视频对比」「这几条视频有什么共同点/差异」；
 - 说「把视频做成 PRD」「从视频里出产品方案」；
@@ -27,8 +28,19 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 
 - 只处理 YouTube 标准 watch 页视频。Shorts、直播、私密、会员、年龄/地区受限、完全无字幕的视频可能抓不到——见「失败兜底」。
 - **转录是唯一事实来源。** 视频没说的不要替它说；术语/行业背景可以补充，但必须标「（背景补充）」或「（我的判断）」。
+- 检索（`tube_search`）只覆盖本地缓存里**已经抓过**的视频，不是全网搜索；要搜全网用 `web_search`，并说明这是全网结果。
 - 一次分析最多 10 个视频（`tube_export` 的硬上限），更多要分批。
 - 导出时目录用绝对路径。
+
+## 模式 0：回忆 / 检索（先判断是不是这一类）
+
+用户给的是**新链接** → 走下面「工作流（四步）」。用户指的是**以前抓过、看过的视频**（「我记得有个视频……」「看过的视频里关于 X 怎么说……」）→ 走检索分支：
+
+1. 读 `references/recall.md`，把用户的口语整理成检索词（同义词、中英各一轮；视频里怎么说就怎么搜）。
+2. 调 `tube_search`（`query` 必填；可带 `video` / `since` / `limit` / `context`）——它只搜本地缓存，不是全网。
+3. 读结果里的 `link` / `timestamp` / `text` / `before` / `after`；要当金句或明确结论引用时，用 `tube_transcript` 拿 `transcriptPath` 再 `read` 核实上下文（缓存命中，秒回）。
+4. 输出：找回某条视频 → 视频卡片；观点汇总 → 带双引用的主题综述（写明扫描范围与检索词）。
+5. 结果不足先换词/换语言再下结论；用户要存档 → `tube_export`（`module=insights` 或 `knowledge`；`videos` 只放实际引用到的视频，≤10）。
 
 ## 工作流（四步）
 
@@ -59,6 +71,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 
 | 用户意图 | 模式 | 产出前必读 |
 |---|---|---|
+| 回忆 / 检索 / 主题综述（用户指的是**以前抓过、看过**的视频，不是新链接） | recall（模式 0） | `references/recall.md`；要存档再看 `references/insights.md` / `references/knowledge.md` |
 | 讲了什么 / 章节 / 要点 / 金句 / 值不值得看（默认模式） | overview | `references/overview.md` |
 | 产品情报：功能、痛点、竞品、商业模式；非产品视频的方法论 | intel | `references/intel.md` |
 | 行业术语解释、核心观点、技术边界、PM 视角 | insights | `references/insights.md` |
@@ -69,7 +82,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 | 把某个时间点的话整理成笔记 | notes | `references/notes.md` |
 | 只要字幕原文 / 逐字稿 | transcript（不算分析模式） | 不用读 reference：直接按 `read` 到的原文输出，保留 `[MM:SS]` 行首（用户要纯文本再去掉），并说明是视频原字幕、可能有 ASR 错误 |
 
-补充：用户只问「某个词/某句话什么意思」时，不进入六种模式——结合上下文用 1–3 句话解释，规则是极简、不套话、不展开成报告（上游 explain 提示词的能力）。
+补充：用户只问「某个词/某句话什么意思」时，不进入任何模式——结合上下文用 1–3 句话解释，规则是极简、不套话、不展开成报告（上游 explain 提示词的能力）。
 
 先问自己一句：用户要的是**对话里看**还是**存成文件**。默认先给对话里的 Markdown，满意后再导出（第 4 步）。
 
@@ -88,10 +101,11 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 - 用户要英文、双语对照，或要翻译字幕/输出 → 必须先读 `references/translation.md`，按那里的规则做，不要自由发挥。
 - 翻译、转述都不得改动时间戳数值，转录与译文逐段对应。
 
-#### 六种模式速览（完整格式见对应 reference）
+#### 模式速览（模式 0 + 六种分析模式，完整格式见对应 reference）
 
 | 模式 | 输出骨架（对话里给 Markdown） | 引用要求 |
 |---|---|---|
+| recall（模式 0） | 检索范围与检索词 → 找回的视频卡片 / 按主题分组的观点汇总 → 共识与分歧 → 覆盖不到的地方 | 每条结论双引用且 `videoId` 与内容对应；写清扫描了 N 个视频、M 个段落；`resultCount=0` 时换词后再如实说没有 |
 | overview | 一句话总结 → 章节（时间 + 标题 + 1–2 句）→ 3–5 条金句 → 关键时刻 → 值不值得看 | 每章起始、每条金句必须双引用；章节覆盖到片尾（最后一章 > 75%） |
 | intel | 内容类型判断（product / methodology）→ 一句话 → 功能 / 痛点 / 竞品 / 商业关键词（方法论类则换核心方法论 / 原则 / 可迁移场景 / 关键词） | 每条来自视频的条目带双引用；视频未提及就写「未提及」 |
 | insights | 术语表（术语 / 分类 / 解释 / 首次出现）→ 按发言人的核心观点 → PM 最有价值的三点 → 技术边界表 | 每条观点双引用；术语表每行给首次出现链接；技术边界只取视频原话 |
@@ -99,7 +113,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 | compare | 视频清单 → 视频概览表 → 核心功能/观点对比矩阵 → 共同趋势 → 差异化亮点 → PM 行动建议 → 延伸阅读 | 矩阵每格至少一处对应视频的双引用；共同趋势至少 2 个视频有证据 |
 | knowledge | 标题 / 来源 / 日期 / 标签 → 核心价值一句话 → 内容摘要 → 产品情报（或核心方法论）→ 关键洞察（+ 技术边界）→ PRD 要点 → 我的笔记 → 下一步行动 | 摘要、功能、洞察、PRD 要点每条双引用；用户笔记原样保留、不强行加引用 |
 
-`translation` 与 `notes` 不是分析模式：`translation` 是叠加在任一模式上的语言层（也可纯翻译字幕），`notes` 是单点笔记润色；两者都保留原有时间戳与双引用格式。
+`recall` 是模式 0（跨视频找回证据），不是分析模式；`translation` 与 `notes` 也不是分析模式：`translation` 是叠加在任一模式上的语言层（也可纯翻译字幕），`notes` 是单点笔记润色；两者都保留原有时间戳与双引用格式。
 
 ### 第 4 步：存档 —— 调用 `tube_export`
 
@@ -123,7 +137,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 - 导出成功后，把返回的 `path` 告诉用户；需要时再 `read` 回来核对关键段落。
 - **不要**自己用 `write` / bash 往导出目录塞 Markdown 冒充导出——会丢 frontmatter、笔记、来源区块和 index.md。
 
-## 两个走通的例子
+## 三个走通的例子
 
 **例 1：用户贴一条链接说「这条视频讲了什么」**
 
@@ -138,6 +152,13 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 2. 读 `references/compare.md`，按六节模板写报告，矩阵每个单元格带对应视频的双引用；
 3. 用户要导出 → `tube_export({ videos: [3 个 id], module: "compare", markdown: "…" })`。
 
+**例 3：用户说「我记得以前有个视频讲过 token 定价不合理，帮我找出来」**
+
+1. 读 `references/recall.md`：用户中文、视频可能是英文，检索词准备 `token pricing`、`pricing`（第二轮再换 `billing` / `token 收费`）。
+2. `tube_search({ query: "token pricing" })` → 看 `timestamp` / `link` / `text`；命中少就换词再搜一轮。
+3. 锁定视频后 `tube_transcript` + `read` 核实上下文 → 给视频卡片（标题 / 频道 / 链接 / 命中片段）。
+4. 用户说「把相关观点整理成综述」→ 按 `references/insights.md` 组织观点，再 `tube_export({ module: "insights", videos: [实际引用的 id…] })` 存档。
+
 ## 失败兜底
 
 | 现象 / 报错 | 你该做什么 |
@@ -149,6 +170,7 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 | 视频超长（1 小时以上） | 用 `offset` / `limit` 分段读完；产出可分「上半场 / 下半场」两段再合并，避免漏掉后段 |
 | 用户一次给超过 10 个视频 | 分批抓取分析；导出时按主题拆成多份（每份 ≤10 个来源），或与用户确认只保留最相关的 10 个 |
 | 转录质量差 | 标注不确定性；关键人名/数字标「（疑似 ASR 错误）」；不要为了通顺硬编 |
+| 检索结果为空，或 `tube_search` 报「缓存为空」 | 按 `references/recall.md` 换同义词/换语言再搜（2–3 轮）；缓存为空就说明还没有抓过视频，请用户给链接先用 `tube_transcript` 抓；仍需全网答案就用 `web_search` 并注明是全网结果 |
 
 ## 交付前自查
 
@@ -159,11 +181,13 @@ description: 处理 YouTube 视频（贴链接或 11 位 ID）：看视频讲了
 5. 对应模式的 reference 读了吗、模板用对了吗（六章 PRD、六节对比报告、知识卡片结构不能缺）？
 6. 用户要存档时，调了 `tube_export` 并把返回路径告诉他了吗？
 7. 输出语言对吗（默认中文；英文/双语按 `references/translation.md`）？
+8. 检索类回答写清「检索的是本地缓存的 N 个视频、M 个段落」和用过的检索词了吗？`resultCount=0` 时是先换词、再如实说没有，而不是直接说「你没看过」？
 
 ## references 索引
 
 | 文件 | 什么时候读 | 移植自上游 |
 |---|---|---|
+| `references/recall.md` | 回忆 / 检索 / 主题综述（模式 0） | 0.2.0 新增（无上游对应；工具契约见 0.2.0 功能契约 F1） |
 | `references/overview.md` | 概览 / 章节 / 金句（默认模式） | `prompts/analysis.md` |
 | `references/intel.md` | 产品情报 / 方法论提炼 | `prompts/product-intelligence.prompt.js` |
 | `references/insights.md` | 行业术语 / 观点 / 技术边界 | `prompts/insight-extractor.prompt.js` |

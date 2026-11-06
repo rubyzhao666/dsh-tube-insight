@@ -1,6 +1,6 @@
 # dsh-tube-insight
 
-> Turn YouTube videos into **citable, archivable notes** inside DeepSeek Harness: fetch captions → merge them into readable timestamped paragraphs → analyze in the current session → export cited Markdown.
+> Turn YouTube videos into **citable, archivable, searchable notes** inside DeepSeek Harness: fetch captions → merge them into readable timestamped paragraphs → search across every video you have fetched → analyze in the current session → export cited Markdown.
 
 Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insight) (MIT, by Zara Zhang) into a DSH plugin. The upstream is a Chrome extension (side panel + Supadata + a second LLM API key). This plugin moves the deterministic work to the DSH host (fetch, segment, cache, export) and **lets the session model do the analysis and writing** — no second API key, no double billing.
 
@@ -10,6 +10,7 @@ Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insig
 - **Readable segmentation**: raw caption lines are merged into complete sentences and paragraphs (splitting on pauses >2s, sentence punctuation, and length limits), each keeping its start second; a `[MM:SS]` Markdown copy is written for the model to `read`.
 - **Chapter parsing**: parses `00:00 Title` timestamps from the video description (only when at least two are found).
 - **Export**: `tube_export` turns model-written Markdown into a file with YAML frontmatter and a trailing `## 来源` (Sources) section of `youtu.be/<id>?t=<sec>` links, then updates an `index.md` grouped by module.
+- **Cross-video search** (0.2.0): `tube_search` searches the transcripts of **all videos you have previously fetched** (BM25 + contiguous-phrase boost, English/CJK tokenization) and returns the video, `[MM:SS]` timestamp, original snippet and a jump link — for "what did the videos I watched say about X?" and topic reviews. It searches the local cache only, never the whole web.
 - **Bundled skill**: the `tube-insight` skill ships overview / intel / insights / prd / compare / knowledge / translation workflows plus citation rules.
 
 Limits: caption-only (native or auto-generated) — no ASR transcription; private/restricted videos are rejected with an actionable error.
@@ -22,7 +23,7 @@ This is a pure ESM, zero-runtime-dependency DSH bundle. Install the local direct
 plugin_manager { action: "install_bundle", target: "<absolute path to this directory>" }
 ```
 
-Or add the local directory from the DSH Plugins UI. After installation you should see `tube_transcript`, `tube_export` and the `tube-insight` skill.
+Or add the local directory from the DSH Plugins UI. After installation you should see `tube_transcript`, `tube_search`, `tube_export` and the `tube-insight` skill.
 
 Requirements: Node.js `^22.19.0 || >=24.0.0`, DSH `>=0.2.1-rc.2 <0.3.0`. No Chrome extension and no Supadata key are required for native captions (Supadata is an optional fallback only).
 
@@ -34,8 +35,10 @@ Just talk to the agent:
 - "Turn this video into a product-intel note / insights note / PRD draft"
 - "Compare these two videos and save the result to <workspace path>"
 - "Export that as Markdown into <absolute directory>"
+- **Recall**: "In the videos I watched before, what was said about LLM training data?" → the model calls `tube_search`, gets timestamped quotes, and `read`s the cached transcript of any hit that needs expanding.
+- **Topic review**: "Search everything I have cached about pricing / model evaluation and turn it into one knowledge card" → `tube_search` for evidence → skill workflow → `tube_export` (module=knowledge or insights).
 
-The model calls the tools first, then follows the bundled skill workflow.
+The model calls the tools first, then follows the bundled skill workflow. `tube_search` **only searches videos you have already fetched with `tube_transcript`**: an empty cache produces an actionable error telling you to fetch a video first; it never searches the whole web.
 
 ### Tool signatures
 
@@ -50,6 +53,18 @@ The model calls the tools first, then follows the bundled skill workflow.
 | `inline` | boolean, default false | Put the full transcript in the tool result (capped at ~60k chars, truncation is reported); otherwise only preview + paths |
 
 Returns: `videoId, title, channel, durationSeconds, publishedAt?, language, captionKind(native|asr), source, segmentCount, charCount, chapters[], transcriptPath, cacheJsonPath, fetchedAt, cached, preview{head,tail}, inlineText?, truncated?`.
+
+`tube_search` (0.2.0, cross-video retrieval)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | string, required | Search terms, 1–200 chars, mixed English/Chinese |
+| `video` | string, optional | Search only this video (URL or 11-char ID); invalid or uncached IDs error out |
+| `since` | string, optional | Only videos cached (`fetchedAt`) on/after this date, ISO `YYYY-MM-DD` |
+| `limit` | number, optional | 1–20, default 8 (values >20 are clamped) |
+| `context` | number, optional | 0–2, default 1: return up to N segments before/after as `before`/`after` |
+
+Returns: `query, scannedVideos, matchedVideos, resultCount, scannedSegments, elapsedMs, results[], truncated?, skippedCacheFiles?`; each result has `videoId, title, channel, url, startSeconds, timestamp, link, text, score, matchedTerms, before?, after?`. Scoring uses BM25 (k1=1.2, b=0.75) plus a ×1.8 boost for a contiguous query phrase; English matches by word, Chinese/CJK by character bigram. When the cache holds more than 500 videos only the 500 most recent are scanned (`truncated: true`); corrupt cache files are skipped without failing.
 
 `tube_export`
 
@@ -103,6 +118,8 @@ $DSH_HOME/tube-insight/
 
 Export directories are chosen with the `dir` parameter (default `~/TubeInsight`). Cache entries never expire; `refresh=true` refetches, repeated calls hit the cache first (idempotent).
 
+`tube_search` is **read-only** over `cache/`: it writes no files, makes no network requests and creates no new data directories. When the cache holds more than 500 videos it scans only the 500 most recent (by `fetchedAt`) and reports `truncated: true`; fetch/refresh a video with `tube_transcript` before searching for the latest content.
+
 ## Export format
 
 ```markdown
@@ -110,7 +127,7 @@ Export directories are chosen with the `dir` parameter (default `~/TubeInsight`)
 title: "…"
 module: "overview"
 generated_at: "2026-11-06T01:43:44.724Z"
-generator: "dsh-tube-insight@0.1.0"
+generator: "dsh-tube-insight@0.2.0"
 source:
   - title: "…"
     channel: "…"
@@ -141,7 +158,7 @@ npm pack --dry-run               # check the files list
 node scripts/smoke.mjs           # real fetch of one video (network), writes under $DSH_HOME/tube-insight/
 ```
 
-Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
+Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
 
 ## Privacy & license
 
