@@ -1,6 +1,6 @@
 # dsh-tube-insight
 
-> Turn YouTube videos into **citable, archivable, searchable notes** inside DeepSeek Harness: fetch captions → merge them into readable timestamped paragraphs → search across every video you have fetched → analyze in the current session → export cited Markdown.
+> Turn YouTube videos into **citable, archivable, searchable notes** inside DeepSeek Harness: fetch captions → merge them into readable timestamped paragraphs → search across every video you have fetched → build a cited evidence brief → analyze in the current session → export cited Markdown.
 
 Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insight) (MIT, by Zara Zhang) into a DSH plugin. The upstream is a Chrome extension (side panel + Supadata + a second LLM API key). This plugin moves the deterministic work to the DSH host (fetch, segment, cache, export) and **lets the session model do the analysis and writing** — no second API key, no double billing.
 
@@ -11,6 +11,7 @@ Ported from [rubyzhao666/tube-insight](https://github.com/rubyzhao666/tube-insig
 - **Chapter parsing**: parses `00:00 Title` timestamps from the video description (only when at least two are found).
 - **Export**: `tube_export` turns model-written Markdown into a file with YAML frontmatter and a trailing `## 来源` (Sources) section of `youtu.be/<id>?t=<sec>` links, then updates an `index.md` grouped by module.
 - **Cross-video search** (0.2.0): `tube_search` searches the transcripts of **all videos you have previously fetched** (BM25 + contiguous-phrase boost, English/CJK tokenization) and returns the video, `[MM:SS]` timestamp, original snippet and a jump link — for "what did the videos I watched say about X?" and topic reviews. It searches the local cache only, never the whole web.
+- **Topic brief** (0.3.0): `tube_synthesis` runs 1–7 search terms (`query` + `queries`) over your cached videos, merges/dedupes by (video, timestamp), groups by video and trims the result — returning a fixed-structure **evidence brief** (every item with `[MM:SS]` and a jump link, plus zero-hit videos and coverage stats). Pass `dir` to save it as Markdown with frontmatter (module=knowledge), a sources block and an updated `index.md`; the model writes the review from the brief without copying citations by hand.
 - **Bundled skill**: the `tube-insight` skill ships overview / intel / insights / prd / compare / knowledge / translation workflows plus citation rules.
 
 Limits: caption-only (native or auto-generated) — no ASR transcription; private/restricted videos are rejected with an actionable error.
@@ -23,7 +24,7 @@ This is a pure ESM, zero-runtime-dependency DSH bundle. Install the local direct
 plugin_manager { action: "install_bundle", target: "<absolute path to this directory>" }
 ```
 
-Or add the local directory from the DSH Plugins UI. After installation you should see `tube_transcript`, `tube_search`, `tube_export` and the `tube-insight` skill.
+Or add the local directory from the DSH Plugins UI. After installation you should see four tools — `tube_transcript`, `tube_search`, `tube_synthesis`, `tube_export` — and the `tube-insight` skill.
 
 Requirements: Node.js `^22.19.0 || >=24.0.0`, DSH `>=0.2.1-rc.2 <0.3.0`. No Chrome extension and no Supadata key are required for native captions (Supadata is an optional fallback only).
 
@@ -37,6 +38,7 @@ Just talk to the agent:
 - "Export that as Markdown into <absolute directory>"
 - **Recall**: "In the videos I watched before, what was said about LLM training data?" → the model calls `tube_search`, gets timestamped quotes, and `read`s the cached transcript of any hit that needs expanding.
 - **Topic review**: "Search everything I have cached about pricing / model evaluation and turn it into one knowledge card" → `tube_search` for evidence → skill workflow → `tube_export` (module=knowledge or insights).
+- **Write a topic review**: "Turn what the videos I watched say about AI products into one review" → `tube_synthesis` gathers the evidence brief in one call (optionally saved to disk) → the model writes the review (consensus / disagreements / gaps) using the brief links as-is.
 
 The model calls the tools first, then follows the bundled skill workflow. `tube_search` **only searches videos you have already fetched with `tube_transcript`**: an empty cache produces an actionable error telling you to fetch a video first; it never searches the whole web.
 
@@ -65,6 +67,22 @@ Returns: `videoId, title, channel, durationSeconds, publishedAt?, language, capt
 | `context` | number, optional | 0–2, default 1: return up to N segments before/after as `before`/`after` |
 
 Returns: `query, scannedVideos, matchedVideos, resultCount, scannedSegments, elapsedMs, results[], truncated?, skippedCacheFiles?`; each result has `videoId, title, channel, url, startSeconds, timestamp, link, text, score, matchedTerms, before?, after?`. Scoring uses BM25 (k1=1.2, b=0.75) plus a ×1.8 boost for a contiguous query phrase; English matches by word, Chinese/CJK by character bigram. When the cache holds more than 500 videos only the 500 most recent are scanned (`truncated: true`); corrupt cache files are skipped without failing.
+
+`tube_synthesis` (0.3.0, search → evidence brief)
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | string, required | Topic/main search term, 1–200 chars; also used as brief title and filename |
+| `queries` | string[], optional | 0–6 extra search terms (merged/deduped with query, each searched once) |
+| `video` | string, optional | Search only this video (URL or 11-char ID) |
+| `since` | string, optional | Only videos cached on/after this date, ISO `YYYY-MM-DD` |
+| `limitPerVideo` | number, optional | Max evidence items per video, 1–8, default 4 |
+| `maxVideos` | number, optional | Max videos to keep, 1–10, default 10 |
+| `dir` | string, optional | Absolute export directory; when given the brief is saved, otherwise only returned |
+| `title` | string, optional | Frontmatter title for the saved file (default "主题综述：<query>"); the filename still uses query |
+
+Returns: `query, queries, scannedVideos, scannedSegments, videos[{videoId,title,channel,url,durationSeconds,hits[{timestamp,startSeconds,link,text}]}], coverage{hitVideos,zeroHitVideos,totalHits,queriedTerms}, markdown, path?, indexpath?, bytes?`.
+Multi-term hits are merged/deduped by (video, timestamp) keeping the higher-scoring copy; videos are ordered by hit count desc with hits ascending by time. No hits plus `dir` is an actionable error and writes nothing; no hits without `dir` returns an empty brief. Brief links come straight from `tube_search` and must be used as-is when writing the review.
 
 `tube_export`
 
@@ -120,6 +138,8 @@ Export directories are chosen with the `dir` parameter (default `~/TubeInsight`)
 
 `tube_search` is **read-only** over `cache/`: it writes no files, makes no network requests and creates no new data directories. When the cache holds more than 500 videos it scans only the 500 most recent (by `fetchedAt`) and reports `truncated: true`; fetch/refresh a video with `tube_transcript` before searching for the latest content.
 
+`tube_synthesis` is read-only by default too; it only writes to the export directory when `dir` is given (reusing the `tube_export` pipeline: frontmatter module=knowledge, sources block, `index.md`, duplicate names numbered).
+
 ## Export format
 
 ```markdown
@@ -158,7 +178,7 @@ npm pack --dry-run               # check the files list
 node scripts/smoke.mjs           # real fetch of one video (network), writes under $DSH_HOME/tube-insight/
 ```
 
-Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
+Coverage: plugin shape, tool registration, skill provider (tolerates a missing `skills/` directory), URL parsing, segmentation, chapter parsing, cache round-trip, export format, cross-video search (tokenization / BM25 / phrase boost / video·since·limit·context filters / corrupt-cache skipping / 500-video truncation / performance: 100 videos and 50k segments under 2s), topic briefs (multi-term merge & dedupe / grouping & truncation / fixed structure / frontmatter + index on disk / determinism / error paths), tool happy paths and error paths (no captions / age restriction / network failure / invalid Supadata key / bad arguments).
 
 ## Privacy & license
 

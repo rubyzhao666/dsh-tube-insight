@@ -92,12 +92,12 @@ test('工具定义符合 Host API 契约', () => {
     assert.equal(typeof tool.execute, 'function')
     assert.ok(Number.isFinite(tool.timeoutMs) && tool.timeoutMs >= 10_000, `${tool.name} timeoutMs 应给出合理超时`)
   }
-  // 网络类工具的超时给足；本地检索工具只需覆盖性能目标
+  // 网络类工具的超时给足；本地检索类工具只需覆盖性能目标
   for (const networkTool of ['tube_transcript', 'tube_export']) {
     const tool = TOOLS.find((item) => item.name === networkTool)
     assert.ok(tool.timeoutMs >= 120_000, `${networkTool} 应给足长任务超时`)
   }
-  assert.deepEqual([...names].sort(), ['tube_export', 'tube_search', 'tube_transcript'])
+  assert.deepEqual([...names].sort(), ['tube_export', 'tube_search', 'tube_synthesis', 'tube_transcript'])
 })
 
 test('tube_search 工具描述写明只搜已缓存视频', () => {
@@ -107,6 +107,18 @@ test('tube_search 工具描述写明只搜已缓存视频', () => {
   assert.match(searchTool.description, /不是全网搜索/)
   assert.deepEqual(searchTool.parameters.required, ['query'])
   assert.equal(searchTool.parameters.properties.query.maxLength, 200)
+})
+
+test('tube_synthesis 工具描述写明证据底稿/引用来自工具返回/可落盘', () => {
+  const synthesisTool = TOOLS.find((tool) => tool.name === 'tube_synthesis')
+  assert.ok(synthesisTool, '应注册 tube_synthesis')
+  assert.match(synthesisTool.description, /底稿/)
+  assert.match(synthesisTool.description, /引用来自工具返回|来自工具返回/)
+  assert.match(synthesisTool.description, /落盘|导出/)
+  assert.deepEqual(synthesisTool.parameters.required, ['query'])
+  assert.equal(synthesisTool.parameters.properties.queries.maxItems, 6)
+  assert.equal(synthesisTool.parameters.properties.limitPerVideo.type, 'number')
+  assert.equal(synthesisTool.parameters.properties.maxVideos.type, 'number')
 })
 
 test('render 返回非空 text 且不抛错（模型观察面）', () => {
@@ -184,6 +196,44 @@ test('render 返回非空 text 且不抛错（模型观察面）', () => {
   assert.match(searchRender[0].text, /youtu\.be\/zjkBMFhNj_g\?t=754/)
   assert.match(searchRender[0].text, /tube_export/)
   assert.match(searchRender[0].text, /read/)
+
+  const synthesisTool = TOOLS.find((tool) => tool.name === 'tube_synthesis')
+  const synthesisMarkdown = '# 主题检索底稿：模型\n> 检索范围：本地缓存 1 个视频 / 10 个段落 · 检索词：模型\n## 证据（按视频分组）\n\n### Intro · Karpathy · 59:48\n- [12:34](https://youtu.be/zjkBMFhNj_g?t=754) 这里提到了模型训练。'
+  const synthesisRender = synthesisTool.output.render(
+    { query: '模型' },
+    {
+      query: '模型',
+      queries: [],
+      scannedVideos: 1,
+      scannedSegments: 10,
+      videos: [
+        {
+          videoId: 'zjkBMFhNj_g',
+          title: 'Intro',
+          channel: 'Karpathy',
+          url: 'https://www.youtube.com/watch?v=zjkBMFhNj_g',
+          durationSeconds: 3588,
+          hits: [
+            {
+              timestamp: '12:34',
+              startSeconds: 754,
+              link: 'https://youtu.be/zjkBMFhNj_g?t=754',
+              text: '这里提到了模型训练。',
+            },
+          ],
+        },
+      ],
+      coverage: { hitVideos: 1, zeroHitVideos: [], totalHits: 1, queriedTerms: ['模型'] },
+      markdown: synthesisMarkdown,
+      path: '/tmp/out/draft.md',
+      indexpath: '/tmp/out/index.md',
+      bytes: 1024,
+    },
+  )
+  assert.match(synthesisRender[0].text, /主题检索底稿/)
+  assert.match(synthesisRender[0].text, /\[12:34\]\(https:\/\/youtu\.be\/zjkBMFhNj_g\?t=754\)/)
+  assert.match(synthesisRender[0].text, /\/tmp\/out\/draft\.md/)
+  assert.match(synthesisRender[0].text, /tube_export/)
 })
 
 test('随包 skill provider：skills/ 目录不存在也不报错', async () => {
