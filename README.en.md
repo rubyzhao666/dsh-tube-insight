@@ -203,6 +203,7 @@ Coverage: plugin shape, tool registration, skill provider (tolerates a missing `
 
 ## Privacy & license
 
+- **Never uses the author's key**: the package embeds no API key and there is no author-run proxy. Captions come from YouTube's public endpoints (no key by default); the optional Supadata fallback uses **your** key. Chat analysis consumes your own DSH model quota.
 - Talks only to YouTube (and optionally Supadata). No accounts, no telemetry, no upload of user data.
 - Persistent data lives in `$DSH_HOME/tube-insight/` and the export directory the user specifies.
 - Caption fetching relies on YouTube-internal endpoints and may break when YouTube changes; failures come with actionable errors and fallback advice.

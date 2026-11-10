@@ -205,6 +205,7 @@ node scripts/smoke.mjs           # 真实抓一个视频（需要网络），产
 
 ## 隐私与许可
 
+- **不消耗作者的 key**：发布包里没有任何 API key，也没有作者的中转服务。抓字幕走 YouTube 公开接口（默认不需要 key）；只有你自己配置了 `SUPADATA_API_KEY` 才会用**你的** Supadata key。聊天里的分析/总结消耗的是你自己 DSH 配置的模型额度。
 - 插件只访问 YouTube / Supadata（可选）网络接口，不收集、不上传用户数据，无遥测。
 - 所有持久数据写在 `$DSH_HOME/tube-insight/` 与用户指定的导出目录。
 - 字幕抓取依赖 YouTube 内部接口，可能随 YouTube 改版失效；插件会给出可操作的错误与降级建议。
